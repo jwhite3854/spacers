@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en"  data-theme="dark">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HuleCom | Spacers</title>
+    <link rel="stylesheet" href="pico.min.css" />
+    <link rel="stylesheet" href="all.min.css" />
+    <link rel="stylesheet" href="style.css" />
+
+    <script type="module">
+        import { createApp, reactive } from './petite-module.min.js'
+        import SpaceTraders from './app/space-traders.js'
+        import CONSTANTS from './app/constants.js'
+
+        const spaceTradersReact = reactive(SpaceTraders)
+        createApp(spaceTradersReact).mount();
+
+        const createAgentButton = document.getElementById('create_agent');
+        if (createAgentButton !== null) {
+            createAgentButton.addEventListener("click", async () => {
+                let modal = document.getElementById('modal-new-agent');
+                let form = modal.querySelector('form');
+                let data = new FormData(form);
+                let inputs = new Array(...data);
+
+                await spaceTradersReact.createAgent(inputs[1][1], inputs[0][1]);
+                closeModal(modal);
+            });
+        }
+
+        let savedAgents = window.localStorage.getItem('agent_access_token');
+        if (savedAgents === null || typeof savedAgents === "undefined") {
+            savedAgents = '{}';
+        }
+
+        savedAgents = JSON.parse(savedAgents);
+
+        const savedAgentsSelect = document.getElementById('saved_agents');
+        for (const [symbol, token] of Object.entries(savedAgents)) {
+            let option = new Option(symbol, String(token));
+            savedAgentsSelect.append(option);
+        }
+
+        savedAgentsSelect.addEventListener("change", () => {
+            document.getElementById('access_token_enter').value = savedAgentsSelect.value;
+        });
+
+        const selectAgentButton = document.getElementById('select_agent');
+        if (selectAgentButton !== null) {
+            selectAgentButton.addEventListener("click", () => {
+                let modal = document.getElementById('modal-agent-access');
+                let form = modal.querySelector('form');
+                let data = new FormData(form);
+                let inputs = new Array(...data);
+                spaceTradersReact.selectAgent(inputs[0][1]).then((valid) => {
+                    if (valid) {
+                        let loggedInAgent = spaceTradersReact.agent.symbol;
+                        savedAgents[loggedInAgent] = inputs[0][1];
+                        window.localStorage.setItem('agent_access_token', JSON.stringify(savedAgents));
+                        document.getElementById('main_dash').classList.remove('d-none')
+                    }
+                });
+                closeModal(modal);
+            });
+        }
+    </script>
+</head>
+
+<body>
+<div class="container" style="margin-top:3rem" v-scope>
+    <!-- Select Agent-->
+    <header v-if="!isSignedIn" id="start_select_agent" class="text-center">            <h2>Select your Agent</h2>
+        <div class="grid">
+            <button data-target="modal-new-agent" onclick="toggleModal(event)">
+                <i class="fas fa-user-plus"></i> New
+            </button>
+            <button data-target="modal-agent-access" onclick="toggleModal(event)">
+                <i class="fas fa-user-astronaut"></i> Existing
+            </button>
+        </div>
+    </header>    
+
+    <!-- Main Dash -->
+    <main id="main_dash" class="d-none">
+        <section style="margin-bottom: 2rem; padding-bottom: var(--spacing); border-bottom: var(--border-width) solid var(--accordion-border-color);">
+            <h4 class="section-header">Agent</h4>
+            <div class="grid">
+                <span>
+                    <i class="fas fa-address-card" style="margin-right: 0.25em"></i> 
+                    {{agent.symbol}}
+                </span>
+                <span>
+                    <i class="fas fa-dollar-sign"></i>
+                    <span id="agent_credit_amount">{{Intl.NumberFormat().format(agent.credits)}}</span>
+                </span>
+                <span>
+                    <i class="fas fa-building"></i> <i class="fa-solid fa-building-flag"></i>
+                    <span id="agent_credit_amount">{{agent.headquarters}}</span>
+                </span>
+            </div>
+        </section>
+
+        <section>
+            <details>
+            <summary @click.once="listContracts()">
+                <i class="fas fa-file-invoice-dollar" style="margin-right: 0.25em"></i> Contracts
+            </summary>
+            <div>
+                <figure style="margin-bottom: 0">
+                    <table role="grid">
+                        <thead>
+                        <tr>
+                            <th scope="col">Contract</th>
+                            <th scope="col">Status</th>
+                            <th scope="col">Deadline</th>
+                            <th scope="col">Payment on Accepting</th>
+                            <th scope="col">Payment on Fulfilling</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        <tr v-for="contract of contracts">
+                            <td>
+                                <a href="javascript:void(0)" @click="getContractDetails(contract.id)">
+                                    {{contract.name}}
+                                </a>
+                            </td>
+                            <td>{{contract.status}}</td>
+                            <td>{{(new Date(contract.deadline)).toLocaleString()}}</td>
+                            <td>{{Intl.NumberFormat().format(contract.accepted_payment)}}</td>
+                            <td>{{Intl.NumberFormat().format(contract.fulfilled_payment)}}</td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </figure>
+                <nav v-if="contracts_total > 20">
+                    <button class="outline" :disabled="contracts_page === 1" @click="listContracts(1)"><<</button>
+                    <button class="outline" :disabled="contracts_page === 1" @click="listContracts(--contracts_page)"><</button>
+                    <select @change="listContracts($event.srcElement.selectedIndex+1)" v-model="contracts_page">
+                        <option v-for="page of [...Array(contracts_total/20).keys()]" :value="(page+1)" :key="`ships_page_${page}`">{{page+1}}</button>
+                    </select>
+                    <button class="outline" :disabled="((contracts_page + 1) * 20) > contracts_total" @click="listContracts(++contracts_page)">></button>
+                    <button class="outline" :disabled="((contracts_page + 1) * 20) > contracts_total" @click="listContracts(contracts_page/20)">>></button>
+                </nav>
+            </div>
+            </details>
+
+            <details>
+            <summary @click.once="listShips()">
+                <i class="fas fa-rocket" style="margin-right: 0.25em"></i> Ships
+            </summary>
+            <div>
+                <figure style="margin-bottom: 0">
+                    <table role="grid">
+                        <thead>
+                        <tr>
+                            <th scope="col">Designation</th>
+                            <th scope="col">Status</th>
+                            <th scope="col">Location</th>
+                            <th scope="col">Type</th>
+                            <th scope="col">Reactor</th>
+                            <th scope="col">Engine</th>
+                            <th scope="col">Crew</th>
+                            <th scope="col">Cargo</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        <tr v-for="ship of ships">
+                            <td>
+                                <a href="javascript:void(0)" @click="getShipDetails(ship.name)">
+                                    {{ship.name}}
+                                </a>
+                            </td>
+                            <td>{{ship.status}}</td>
+                            <td>
+                                <a href="javascript:void(0)" @click="getWaypointDetails(ship.system, ship.waypoint)">
+                                    {{ship.waypoint}}
+                                </a>
+                            </td>
+                            <td>{{ship.frame}}</td>
+                            <td>{{ship.engine}}</td>
+                            <td>{{ship.reactor}}</td>
+                            <td>{{ship.crew}}</td>
+                            <td>{{ship.cargo}}/{{ship.cargo_max}}</td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </figure>
+                <nav v-if="ships_total > 20">
+                    <button class="outline" :disabled="ships_page === 1" @click="listShips(1)"><<</button>
+                    <button class="outline" :disabled="ships_page === 1" @click="listShips(--ships_page)"><</button>
+                    <select @change="listShips($event.srcElement.selectedIndex+1)" v-model="ships_page">
+                        <option v-for="page of [...Array(ships_total/20).keys()]" :value="(page+1)" :key="`ships_page_${page}`">{{page+1}}</button>
+                    </select>
+                    <button class="outline" :disabled="((ships_page + 1) * 20) > ships_total" @click="listShips(++ships_page)">></button>
+                    <button class="outline" :disabled="((ships_page + 1) * 20) > ships_total" @click="listShips(ships_page/20)">>></button>
+                </nav>
+            </div>
+            </details>
+        </section>
+
+        <section v-if="details_type.length > 0">
+            <details open>
+                <summary>
+                    <i class="fa-solid fa-circle-user" style="margin-right: 0.25em"></i> {{details_type === 'Ship' ? details_object.symbol : details_type}} Details
+                </summary>
+                <pre style="padding: 12px">{{JSON.stringify(details_object, null, 2)}}</pre>
+            </details>
+        </section>
+
+        <section v-if="details_type === 'Ship'">
+            <pre style="padding: 12px">{{JSON.stringify(command_response, null, 2)}}</pre>
+            <details open>
+                <summary>
+                    <i class="fas fa-shuttle-space" style="margin-right: 0.25em"></i> {{commander.ship}} Actions
+                </summary>
+                <div>
+                    <h5 class="section-header">Navigation</h5>
+                    <strong>Waypoint Actions</strong>
+                    <div class="grid">
+                        <button>Dock</button>
+                        <button>Orbit</button>
+                        <button>Refuel</button>
+                    </div>
+                    <strong>System Travel</strong>
+                    <div class="grid">
+                        <button>Set Course</button>
+                        <button>Set Speed</button>
+                        <div></div>
+                    </div>
+                    <strong>Inter-system Travel</strong>
+                    <div class="grid">
+                        <button>Set Course</button>
+                        <button>Gate Jump</button>
+                        <button>Warp</button>
+                    </div>
+                </div>
+                <div>
+                    <h5 class="section-header">Exploration</h5>
+                    <div class="grid">
+                        <button>Scan System</button>
+                        <button>Scan Waypoint</button>
+                        <button>Scan Ship</button>
+                    </div>
+                    <div class="grid">
+                        <button>Create Chart</button>
+                        <button>Create Survey</button>
+                        <div></div>
+                    </div>
+                </div>
+                <div>
+                    <h5 class="section-header">Cargo</h5>
+                    <div class="grid">
+                        <button>View Inventory</button>
+                        <button>Sell</button>
+                        <button>Purchase</button>
+                    </div>
+                    <div class="grid">
+                        <button>Transfer</button>
+                        <button>Jettison</button>
+                        <div></div>
+                    </div>
+                </div>
+                <div>
+                    <h5 class="section-header">Resources</h5>
+                    <div class="grid">
+                        <button>Extract</button>
+                        <button>Refine</button>
+                        <button>View Cooldown</button>
+                    </div>
+                </div>
+            </details>
+        </section>
+
+        <section>
+            <h4 class="section-header">Sector Information</h4>
+            <details style="margin-top: 1rem">
+            <summary @click.once="listSystems()">
+                <i class="fas fa-globe" style="margin-right: 0.25em"></i> Systems
+            </summary>
+            <div>
+                <figure style="margin-bottom: 0">
+                    <table role="grid">
+                        <thead>
+                        <tr>
+                            <th scope="col">System</th>
+                            <th scope="col">Type</th>
+                            <th scope="col">X</th>
+                            <th scope="col">Y</th>
+                            <th scope="col">Waypoints</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        <tr v-for="system of systems">
+                            <td>
+                                <a href="javascript:void(0)" @click="listWaypoints(system.symbol)">
+                                    {{system.symbol}}
+                                </a>
+                            </td>
+                            <td>{{system.type}}</td>
+                            <td>{{system.x}}</td>
+                            <td>{{system.y}}</td>
+                            <td>{{system.waypoints}}</td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </figure>
+                <nav v-if="systems_total > 20">
+                    <button class="outline" :disabled="systems_page === 1" @click="listSystems(1)">
+                        <i class="fas fa-angle-double-left"></i>
+                    </button>
+                    <button class="outline" :disabled="systems_page === 1" @click="listSystems(--systems_page)">
+                        <i class="fas fa-angle-left"></i>
+                    </button>
+                    <select @change="listSystems($event.srcElement.selectedIndex+1)" v-model="systems_page">
+                        <option v-for="page of [...Array(systems_total/20).keys()]" :value="(page+1)" :key="`system_page_${page}`">{{page+1}}</button>
+                    </select>
+                    <button class="outline" :disabled="((systems_page + 1) * 20) > systems_total" @click="listSystems(++systems_page)">
+                        <i class="fas fa-angle-right"></i>
+                    </button>
+                    <button class="outline" :disabled="((systems_page + 1) * 20) > systems_total" @click="listSystems(systems_total/20)">
+                        <i class="fas fa-angle-double-right"></i>
+                    </button>
+                </nav>
+            </div>
+            </details>
+            <details v-if="waypoints.length > 0" open>
+            <summary>
+                <i class="fas fa-location-dot" style="margin-right: 0.25em"></i> {{waypoints[0].system}} Waypoints
+            </summary>
+            <div>
+                <table role="grid">
+                    <thead>
+                    <tr>
+                        <th scope="col">Waypoint</th>
+                        <th scope="col">Type</th>
+                        <th scope="col">X</th>
+                        <th scope="col">Y</th>
+                        <th scope="col">Traits</th>
+                        <th scope="col">Facility</th>
+                        <th scope="col">Faction</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr v-for="waypoint of waypoints">
+                        <td>
+                            <a href="javascript:void(0)" @click="getWaypointDetails(waypoint.system, waypoint.symbol)">
+                                {{waypoint.symbol}}
+                            </a>
+                        </td>
+                        <td>{{waypoint.type}}</td>
+                        <td>{{waypoint.x}}</td>
+                        <td>{{waypoint.y}}</td>
+                        <td>{{waypoint.traits.join(', ')}}</td>
+                        <td v-if="waypoint.facility_type.length > 0">
+                            <a href="javascript:void(0)" @click="waypoint.facility_function">
+                                {{waypoint.facility_type}}
+                            </a>
+                        </td>
+                        <td v-else></td>
+                        <td>{{waypoint.faction}}</td>
+                    </tr>
+                    </tbody>
+                </table>
+                <nav v-if="waypoints_total > 20">
+                    <button class="outline" :disabled="waypoints_page === 1" @click="listWaypoints(waypoints[0].system, 1)">
+                        <i class="fas fa-angles-left"></i>
+                    </button>
+                    <button class="outline" :disabled="waypoints_page === 1" @click="listWaypoints(waypoints[0].system, --waypoints_page)">
+                        <i class="fas fa-angle-left"></i>
+                    </button>
+                    <select @change="listWaypoints(waypoints[0].system, $event.srcElement.selectedIndex+1)" v-model="waypoints_page">
+                        <option v-for="page of [...Array(waypoints_total/20).keys()]" :value="(page+1)" :key="`system_page_${page}`">{{page+1}}</button>
+                    </select>
+                    <button class="outline" :disabled="((waypoints_page + 1) * 20) > waypoints_total" @click="listWaypoints(waypoints[0].system, ++waypoints_page)">
+                        <i class="fas fa-angle-right"></i>
+                    </button>
+                    <button class="outline" :disabled="((waypoints_page + 1) * 20) > waypoints_total" @click="listWaypoints(waypoints[0].system, waypoints_total/20)">
+                        <i class="fas fa-angles-right"></i>
+                    </button>
+                </nav>
+            </div>
+            </details>
+        </section>
+        <!-- ./ Main Dash -->
+    </main>
+<!-- ./ Main -->
+<!-- Footer -->
+    <footer>
+        <small></small>
+    </footer>
+<!-- ./ Footer -->
+</div>
+<!-- New Agent Modal -->
+<dialog id="modal-new-agent">
+    <article  style="width: 520px;">
+        <a href="javascript:void(0)" aria-label="Close" class="close" data-target="modal-new-agent" onclick="toggleModal(event)"></a>
+        <h4>Create new Agent</h4>
+        <form id="new_agent">
+            <!-- New Agent Call-sign -->
+            <label for="call_sign" class="d-none">Call-sign</label>
+            <input type="text" id="call_sign" name="call_sign" placeholder="New Agent Call-sign" required />
+            <small>Enter a Call-sign of 3-14 letter</small>
+
+            <!-- New Agent Faction -->
+            <label for="agent_faction" class="d-none">Faction</label>
+            <select id="agent_faction" name="agent_faction" required>
+                <option selected disabled>Select your Faction</option>
+                <option value="COSMIC">Cosmic</option>
+            </select>
+        </form>
+        <footer>
+            <a href="javascript:void(0)" role="button" class="secondary" data-target="modal-new-agent" onclick="toggleModal(event)">Cancel</a>
+            <a href="javascript:void(0)" id="create_agent" role="button" data-target="modal-new-agent" data-form="new_agent">Confirm</a>
+        </footer>
+    </article>
+</dialog>
+<!-- ./ Modal -->
+
+<!-- New Agent Modal -->
+<dialog id="modal-agent-access">
+    <article style="width: 520px;">
+        <a href="javascript:void(0)" aria-label="Close" class="close" data-target="modal-agent-access" onclick="toggleModal(event)"></a>
+        <h4>Agent Access Token</h4>
+        <form id="existing_agent">
+            <!-- Saved Agent -->
+            <select id="saved_agents">
+                <option value="" selected>Saved Agents</option>
+            </select>
+
+            <!-- Existing Agent Token -->
+            <label for="access_token_enter" class="d-none">Call-sign</label>
+            <input type="text" id="access_token_enter" name="access_token_enter" placeholder="Access Token" required />
+            <small>Enter the agent's access token</small>
+        </form>
+        <footer>
+            <a href="javascript:void(0)" role="button" class="secondary" data-target="modal-agent-access" onclick="toggleModal(event)">Cancel</a>
+            <a href="javascript:void(0)" id="select_agent" role="button" data-target="modal-agent-access" data-form="existing_agent">Submit</a>
+        </footer>
+    </article>
+</dialog>
+<!-- ./ Modal -->
+
+<!-- UI JS -->
+<script type="text/javascript" src="ui.js"></script>
+</body>
+</html>
